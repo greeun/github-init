@@ -1,0 +1,13 @@
+# general .gitignore
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.log
+logs/
+*.tmp
+*.temp
+.vscode/
+.idea/
+*.swp
+*.swo
