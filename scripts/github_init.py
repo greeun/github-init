@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -81,8 +82,14 @@ PROJECT_MARKERS = {
 # ---------------------------------------------------------------------------
 
 def run(cmd, cwd=None, check=False):
-    """Run a shell command and return CompletedProcess."""
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd, check=check)
+    """Run a command and return CompletedProcess.
+
+    Args:
+        cmd: Command as a list of strings, or a string for simple commands.
+    """
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, check=check)
 
 
 def detect_project_type(cwd):
@@ -263,7 +270,7 @@ def cmd_init(args):
     if not git["has_commits"]:
         if not dry:
             run("git add .", cwd=cwd, check=True)
-            run('git commit -m "Initial commit"', cwd=cwd, check=True)
+            run(["git", "commit", "-m", "Initial commit"], cwd=cwd, check=True)
         step("Created initial commit")
     else:
         # Stage any unstaged changes
@@ -271,7 +278,7 @@ def cmd_init(args):
         if r.stdout.strip():
             if not dry:
                 run("git add .", cwd=cwd, check=True)
-                run('git commit -m "Initial commit"', cwd=cwd, check=True)
+                run(["git", "commit", "-m", "Initial commit"], cwd=cwd, check=True)
             step("Committed unstaged changes")
         else:
             step("All changes already committed")
@@ -279,12 +286,13 @@ def cmd_init(args):
     # ---- GitHub repo ----
     repo_name = args.name or Path(cwd).name
     vis_flag = "--public" if args.visibility == "public" else "--private"
-    desc_flag = f' --description "{args.description}"' if args.description else ""
 
     if git["has_remote"]:
         step(f"Remote already exists: {git['remote_url']}")
     else:
-        gh_cmd = f"gh repo create {repo_name} --source=. {vis_flag}{desc_flag} --push"
+        gh_cmd = ["gh", "repo", "create", repo_name, "--source=.", vis_flag, "--push"]
+        if args.description:
+            gh_cmd.extend(["--description", args.description])
         if not dry:
             r = run(gh_cmd, cwd=cwd)
             if r.returncode != 0:
