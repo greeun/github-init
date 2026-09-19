@@ -21,50 +21,104 @@ from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # .gitignore templates (embedded for zero-dependency execution)
+#
+# A template is a list of (section comment, [patterns]) pairs instead of a flat
+# list. Sections keep related patterns adjacent in the generated file, and that
+# adjacency is load-bearing for negation: git resolves "!" exceptions by
+# last-match-wins, so "!.env*.example" only keeps working while it sits after
+# ".env*". Grouping them lets the merge step move a section as one unit.
 # ---------------------------------------------------------------------------
+
+ENV_SECTION = (
+    "env files (example and template files stay tracked)",
+    [".env*", "!.env*.example", "!.env*.template"],
+)
+
+EDITOR_SECTION = ("editors", [".idea/", ".vscode/", "*.swp", "*.swo"])
+
+OS_SECTION = ("OS", [".DS_Store", "Thumbs.db"])
+
+# Local state written by coding agents and their tooling. None of it describes
+# the project, and some of it (CLAUDE.md, MCP config) is personal enough that
+# committing it leaks how an individual works rather than how the code works.
+# Every project type gets this block, since the tooling is language-agnostic.
+#
+# The patterns are deliberately narrower than a bare ".ast*" or ".axt*" prefix:
+# ".ast*" would also swallow Astro's ".astro/" cache directory, which is a real
+# build artifact some projects do want to reason about separately.
+AGENT_TOOLING_SECTIONS = [
+    (
+        "claude code (instructions, local settings, session worktrees, MCP config)",
+        ["CLAUDE.md", ".claude/", ".claude.json", ".claude.json.*", ".claude-*.json"],
+    ),
+    (
+        "superpowers (auto-installed working notes)",
+        [".superpowers/", "docs/superpowers/"],
+    ),
+    ("axt local profile (including backups)", [".axt/", ".axt-*", ".axt.*"]),
+    ("ast (agent session tracker) local state", [".ast/", ".ast-*", ".ast.*"]),
+]
 
 GITIGNORE_TEMPLATES = {
     "nodejs": [
-        "node_modules/", "dist/", "build/", ".next/", "out/",
-        "*.log", "npm-debug.log*", "yarn-debug.log*", "yarn-error.log*",
-        ".env", ".env.local", ".env.*.local",
-        "coverage/", ".nyc_output/", ".cache/",
-        ".DS_Store", "Thumbs.db",
+        ("dependencies", ["node_modules/"]),
+        ("build output", ["dist/", "build/", ".next/", "out/", "*.tsbuildinfo"]),
+        (
+            "logs",
+            ["*.log", "npm-debug.log*", "yarn-debug.log*", "yarn-error.log*",
+             "pnpm-debug.log*", "logs/"],
+        ),
+        ("test output", ["coverage/", ".nyc_output/"]),
+        ("caches", [".cache/", ".turbo/", ".eslintcache"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
     "python": [
-        "__pycache__/", "*.py[cod]", "*$py.class",
-        ".venv/", "venv/", "env/", ".env",
-        "build/", "dist/", "*.egg-info/", "*.egg",
-        ".pytest_cache/", ".coverage", "htmlcov/", ".tox/",
-        ".ipynb_checkpoints/",
-        ".DS_Store", "Thumbs.db",
+        ("byte-compiled", ["__pycache__/", "*.py[cod]", "*$py.class"]),
+        ("virtualenvs", [".venv/", "venv/"]),
+        ("build output", ["build/", "dist/", "*.egg-info/", "*.egg"]),
+        ("test output", [".pytest_cache/", ".coverage", "htmlcov/", ".tox/"]),
+        ("notebooks", [".ipynb_checkpoints/"]),
+        ("caches", [".mypy_cache/", ".ruff_cache/"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
     "go": [
-        "*.exe", "*.exe~", "*.dll", "*.so", "*.dylib",
-        "*.test", "*.out",
-        "vendor/", "go.work",
-        ".DS_Store", "Thumbs.db",
+        ("binaries", ["*.exe", "*.exe~", "*.dll", "*.so", "*.dylib"]),
+        ("test output", ["*.test", "*.out"]),
+        ("modules", ["vendor/", "go.work", "go.work.sum"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
     "rust": [
-        "/target/", "**/*.rs.bk",
-        ".DS_Store", "Thumbs.db",
+        ("build output", ["/target/", "**/*.rs.bk"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
     "java": [
-        "target/", "build/", ".gradle/", "*.class", "*.jar", "*.war",
-        ".idea/", "*.iml",
-        ".DS_Store", "Thumbs.db",
+        ("build output", ["target/", "build/", ".gradle/", "*.class", "*.jar", "*.war"]),
+        ("editors", [".idea/", "*.iml", ".vscode/", "*.swp", "*.swo"]),
+        ENV_SECTION,
+        OS_SECTION,
     ],
     "ruby": [
-        "vendor/bundle/", ".bundle/", "*.gem", "*.rbc",
-        "coverage/", "spec/reports/",
-        ".DS_Store", "Thumbs.db",
+        ("dependencies", ["vendor/bundle/", ".bundle/"]),
+        ("build output", ["*.gem", "*.rbc"]),
+        ("test output", ["coverage/", "spec/reports/"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
     "general": [
-        ".DS_Store", "Thumbs.db",
-        ".env", ".env.local",
-        "*.log", "logs/",
-        "*.tmp", "*.temp",
-        ".vscode/", ".idea/", "*.swp", "*.swo",
+        ("logs", ["*.log", "logs/"]),
+        ("temporary files", ["*.tmp", "*.temp"]),
+        ENV_SECTION,
+        EDITOR_SECTION,
+        OS_SECTION,
     ],
 }
 
@@ -75,6 +129,16 @@ PROJECT_MARKERS = {
     "rust":    {"required": ["Cargo.toml"], "optional": ["Cargo.lock", "target"]},
     "java":    {"required": ["pom.xml", "build.gradle", "build.gradle.kts"], "optional": ["target", "build", ".gradle"]},
     "ruby":    {"required": ["Gemfile"], "optional": ["Gemfile.lock", "vendor/bundle"]},
+}
+
+# A committed lockfile is an instruction to everyone who installs next, so two
+# of them in one repository is a contradiction. Whichever one is present tells
+# us the package manager in use; the others are strays worth ignoring.
+LOCKFILES = {
+    "pnpm-lock.yaml": "pnpm",
+    "yarn.lock": "yarn",
+    "package-lock.json": "npm",
+    "bun.lockb": "bun",
 }
 
 # ---------------------------------------------------------------------------
@@ -115,6 +179,21 @@ def detect_project_type(cwd):
         return None, [], 0
     best = max(scores, key=scores.get)
     return best, detected[best], scores[best]
+
+
+def detect_package_manager(cwd):
+    """Identify the Node package manager from the lockfile that is present.
+
+    Returns (manager, lockfile, stray_lockfiles). When zero or several
+    lockfiles exist we cannot tell which one is authoritative, so we report
+    nothing and leave every lockfile tracked -- guessing here would ignore the
+    file the project actually depends on.
+    """
+    present = [name for name in LOCKFILES if (Path(cwd) / name).exists()]
+    if len(present) != 1:
+        return None, None, []
+    lock = present[0]
+    return LOCKFILES[lock], lock, [n for n in LOCKFILES if n != lock]
 
 
 def detect_git_status(cwd):
@@ -158,6 +237,115 @@ def detect_sensitive_files(cwd):
     return found
 
 
+def tracked_but_ignored(cwd):
+    """Files git tracks that the ignore rules also match.
+
+    Adding a pattern never untracks anything, so these files keep being
+    committed while .gitignore claims they are out of the repository. The
+    contradiction is what bites later: someone reads the ignore file, assumes
+    the file is gone, and is surprised when their edit to it lands in a diff.
+
+    Entries the index still holds but the working tree no longer has are left
+    out. Those are pending deletions, and the author clearly wants them gone --
+    resurrecting them with an exception would undo the removal they started.
+    """
+    r = run("git ls-files --ignored --exclude-standard -c", cwd=cwd)
+    if r.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in r.stdout.splitlines()
+        if line.strip() and (Path(cwd) / line.strip()).exists()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# .gitignore composition
+# ---------------------------------------------------------------------------
+
+def build_sections(cwd, template_key):
+    """Assemble the sections for a project: template + package manager + agents."""
+    sections = list(GITIGNORE_TEMPLATES.get(template_key, GITIGNORE_TEMPLATES["general"]))
+
+    if template_key == "nodejs":
+        manager, lock, strays = detect_package_manager(cwd)
+        if manager:
+            sections.append((
+                f"this project uses {manager} ({lock}); other lockfiles are strays",
+                strays,
+            ))
+
+    sections.extend(AGENT_TOOLING_SECTIONS)
+    return sections
+
+
+def render_sections(sections, header=None):
+    """Render (comment, patterns) pairs as .gitignore text."""
+    lines = [header] if header else []
+    for comment, patterns in sections:
+        if not patterns:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"# {comment}")
+        lines.extend(patterns)
+    return "\n".join(lines) + "\n"
+
+
+def existing_patterns(text):
+    """Patterns already in the file, lowercased, for case-insensitive dedup."""
+    return {
+        line.strip().lower()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+def plan_merge(existing_text, sections):
+    """Work out what to append to an existing .gitignore.
+
+    Returns (sections_to_append, restated_negations, added_pattern_count).
+
+    Deduplication alone is not enough here, because order decides what a "!"
+    line means. Two rules keep the merged file behaving the way it reads:
+
+    - A section containing "!" exceptions is appended whole as soon as any of
+      its patterns is new. Appending only the missing half would strand the
+      exception above the pattern it overrides, and git would go on ignoring a
+      file the author meant to track.
+    - Exceptions already in the file are restated at the end. Everything we add
+      lands below them, so without this an added ".env*" would silently cancel
+      an existing "!.env.example".
+    """
+    have = existing_patterns(existing_text)
+    to_append = []
+    added = 0
+
+    for comment, patterns in sections:
+        missing = [p for p in patterns if p.strip().lower() not in have]
+        if not missing:
+            continue
+        if any(p.startswith("!") for p in patterns):
+            to_append.append((comment, list(patterns)))
+        else:
+            to_append.append((comment, missing))
+        added += len(missing)
+        have.update(p.strip().lower() for p in patterns)
+
+    if not to_append:
+        return [], [], 0
+
+    appended_lower = {
+        p.strip().lower() for _, patterns in to_append for p in patterns
+    }
+    restated = [
+        line.strip()
+        for line in existing_text.splitlines()
+        if line.strip().startswith("!") and line.strip().lower() not in appended_lower
+    ]
+    return to_append, restated, added
+
+
 # ---------------------------------------------------------------------------
 # detect subcommand
 # ---------------------------------------------------------------------------
@@ -168,6 +356,7 @@ def cmd_detect(args):
     git = detect_git_status(cwd)
     sensitive = detect_sensitive_files(cwd)
     has_gitignore = (Path(cwd) / ".gitignore").exists()
+    manager, lock, strays = detect_package_manager(cwd)
 
     result = {
         "cwd": cwd,
@@ -177,7 +366,11 @@ def cmd_detect(args):
         "confidence": confidence,
         "suggested_gitignore": proj_type or "general",
         "has_gitignore": has_gitignore,
+        "package_manager": manager,
+        "lockfile": lock,
+        "stray_lockfiles": strays,
         "sensitive_files": sensitive,
+        "tracked_but_ignored": tracked_but_ignored(cwd) if git["has_git"] else [],
         **git,
     }
     print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -192,10 +385,15 @@ def cmd_init(args):
     dry = args.dry_run
     steps = []
     errors = []
+    warnings = []
 
     def step(msg):
         steps.append(msg)
         print(f"  {'[DRY-RUN] ' if dry else ''}+ {msg}")
+
+    def warn(msg):
+        warnings.append(msg)
+        print(f"  ~ {msg}")
 
     def fail(msg):
         errors.append(msg)
@@ -223,33 +421,67 @@ def cmd_init(args):
         step("Skipping .gitignore generation")
     else:
         template_key = proj_type or "general"
-        # Copy so appending sensitive files below doesn't mutate the global template.
-        new_entries = list(GITIGNORE_TEMPLATES.get(template_key, GITIGNORE_TEMPLATES["general"]))
-        sensitive = detect_sensitive_files(cwd)
-        for s in sensitive:
-            if s not in new_entries:
-                new_entries.append(s)
+        sections = build_sections(cwd, template_key)
+
+        # Anything credential-shaped that the template does not already cover
+        # deserves its own line, so the reason it is ignored stays readable.
+        covered = {p.strip().lower() for _, patterns in sections for p in patterns}
+        extra_sensitive = [s for s in detect_sensitive_files(cwd) if s.lower() not in covered]
+        if extra_sensitive:
+            sections.append(("credentials found in this directory", extra_sensitive))
+
+        if template_key == "nodejs":
+            manager, lock, _ = detect_package_manager(cwd)
+            if manager:
+                step(f"Detected package manager: {manager} ({lock})")
+            elif any((Path(cwd) / n).exists() for n in LOCKFILES):
+                warn("Multiple lockfiles present; leaving all of them tracked")
 
         if gitignore_path.exists():
-            existing = gitignore_path.read_text().splitlines()
-            existing_set = {l.strip().lower() for l in existing if l.strip() and not l.startswith("#")}
-            unique = [e for e in new_entries if e.strip().lower() not in existing_set]
-            if unique:
+            existing = gitignore_path.read_text()
+            to_append, restated, added = plan_merge(existing, sections)
+            if added:
+                body = render_sections(to_append, header="# Added by github-init")
+                if restated:
+                    body += "\n" + render_sections(
+                        [("exceptions restated so the rules above cannot cancel them", restated)]
+                    )
                 if not dry:
                     with gitignore_path.open("a") as f:
-                        f.write("\n# Added by github-init\n")
-                        for entry in unique:
-                            f.write(f"{entry}\n")
-                step(f"Merged {len(unique)} entries into existing .gitignore ({template_key})")
+                        if not existing.endswith("\n"):
+                            f.write("\n")
+                        f.write("\n" + body)
+                step(f"Merged {added} entries into existing .gitignore ({template_key})")
+                if restated:
+                    step(f"Restated {len(restated)} exception(s) to preserve their effect")
             else:
                 step(".gitignore already up-to-date")
         else:
+            content = render_sections(sections, header=f"# {template_key} .gitignore")
             if not dry:
-                with gitignore_path.open("w") as f:
-                    f.write(f"# {template_key} .gitignore\n")
-                    for entry in new_entries:
-                        f.write(f"{entry}\n")
-            step(f"Created .gitignore ({template_key}, {len(new_entries)} entries)")
+                gitignore_path.write_text(content)
+            count = sum(len(p) for _, p in sections)
+            step(f"Created .gitignore ({template_key}, {count} entries)")
+
+        # ---- verify against what git already tracks ----
+        # Only meaningful once a repository exists: a fresh directory tracks
+        # nothing, so there is no contradiction to find yet.
+        if git["has_git"] and not dry:
+            conflicts = tracked_but_ignored(cwd)
+            if conflicts:
+                exceptions = [f"!{path}" for path in conflicts]
+                with gitignore_path.open("a") as f:
+                    f.write("\n" + render_sections([(
+                        "already tracked, so kept tracked despite the rules above",
+                        exceptions,
+                    )]))
+                warn(
+                    f"{len(conflicts)} tracked file(s) matched the new rules; "
+                    f"added exceptions to keep them tracked: {', '.join(conflicts[:5])}"
+                    + (" ..." if len(conflicts) > 5 else "")
+                )
+        elif git["has_git"] and dry:
+            step("Would verify the new rules against tracked files")
 
     # ---- git init ----
     if not git["has_git"]:
@@ -325,11 +557,16 @@ def cmd_init(args):
             step(f"Pushed to {repo_url}")
 
     # ---- summary ----
-    _summary(len(errors) == 0, steps, errors, repo_name=repo_name)
+    _summary(len(errors) == 0, steps, errors, repo_name=repo_name, warnings=warnings)
 
 
-def _summary(success, steps, errors, repo_name=None):
+def _summary(success, steps, errors, repo_name=None, warnings=None):
     print()
+    if warnings:
+        print("Warnings:")
+        for w in warnings:
+            print(f"  - {w}")
+        print()
     if success:
         print(f"Done! Repository '{repo_name}' is ready.")
     else:
