@@ -12,6 +12,9 @@ Git init, `.gitignore` generation, GitHub repo creation, and push -- all in one 
 - **Edge case handling** -- existing `.git/`, existing remote, existing commits
 - **Dry-run mode** -- preview all steps before executing
 - **Private by default** -- safe default visibility
+- **English by default** -- repository name, description, commit message, and any
+  document written into the repository are in English even when you ask in another
+  language
 
 ## Prerequisites
 
@@ -47,9 +50,13 @@ Just ask Claude:
 
 Claude will:
 1. Detect the project type
-2. Ask for repo name, visibility, description
+2. Ask for repo name, visibility, description -- proposing English values, with a non-ASCII
+   directory name translated into kebab-case rather than transliterated
 3. Run the initialization
-4. Report the result
+4. Report the result, including any English value it drafted on your behalf
+
+Values you supply yourself are passed through untouched, so a description in another language
+stays exactly as you wrote it. The report itself follows the language you are speaking.
 
 ### CLI (direct script usage)
 

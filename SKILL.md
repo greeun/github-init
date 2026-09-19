@@ -5,29 +5,62 @@ description: |
   Automates project detection, .gitignore generation, and edge case handling.
   Use when: "initialize git repo", "create GitHub repository", "push to GitHub", "set up git",
   "깃허브 초기화", "깃 설정", "저장소 생성", "깃허브 연동", "깃허브 푸시", "깃허브에 올려줘".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # GitHub Repository Initialization
 
-Git init, .gitignore 생성, GitHub repo 생성, push를 한 워크플로우로 자동화.
+Automates git init, .gitignore generation, GitHub repo creation, and push as one workflow.
 
 ## Prerequisites
 
 - `git` installed
 - `gh` CLI installed and authenticated (`gh auth login`)
 
+## Output Language
+
+Everything this skill writes into the repository or onto GitHub is in English, whatever language
+the conversation happens to be in. A repository is read by people who were never part of that
+conversation, so what it contains has to stand on its own.
+
+| Output | Rule |
+|--------|------|
+| Repository name | ASCII lowercase kebab-case, e.g. `order-sync-api` |
+| Description | One English sentence, no trailing period, roughly ten words |
+| Commit message | English; the script writes `Initial commit` |
+| `.gitignore` comments | English; written by the script |
+| Any document written into the repository | English, e.g. README, LICENSE, CONTRIBUTING, docs |
+
+Whole documents follow the same rule, not just these short values. When the initialization also
+produces files, whether a README, a LICENSE, a CONTRIBUTING guide or anything else the user asks
+for while setting the repository up, write them in English as well. A repository whose metadata is
+English while its README is not still forces the next reader to switch languages halfway through.
+
+Talking to the user is the exception. AskUserQuestion prompts, warnings and the Phase 4 report
+follow whatever language the user is using. Only what ends up inside the repository is fixed to
+English.
+
+Two rules decide what you write:
+
+- **An explicit input wins.** When the user hands you a name or a description in another
+  language, pass it through unchanged instead of translating it. The same holds when they ask for
+  a document in a particular language: write it the way they asked.
+- **When the value is yours to draft, translate the meaning rather than the sound.** A directory
+  named `주문 동기화 API` becomes `order-sync-api`, never `jumun-donggihwa-api`. This applies to
+  `suggested_repo_name` as well, since it is only the directory name: normalize it to ASCII
+  kebab-case before offering it, and say what you derived it from when the original was not ASCII.
+
 ## Workflow
 
 ### Phase 1: Detect Project
 
-프로젝트 타입과 git 상태를 자동 감지한다.
+Detect the project type and git status automatically.
 
 ```bash
 python3 ~/.claude/skills/github-init/scripts/github_init.py detect
 ```
 
-출력 예시:
+Example output:
 ```json
 {
   "suggested_repo_name": "my-project",
@@ -54,9 +87,12 @@ Use **AskUserQuestion** to gather:
 
 | Question | Default | Options |
 |----------|---------|---------|
-| Repository name | `suggested_repo_name` from detect | Free text |
+| Repository name | `suggested_repo_name` from detect, normalized to ASCII kebab-case | Free text |
 | Visibility | private | public, private |
-| Description | (none) | Free text |
+| Description | An English one-liner drafted from the detected project type and contents | Free text |
+
+Draft the description instead of leaving it empty. A draft is easy for the user to overwrite,
+while an empty description is easy to forget and harder to notice later.
 
 ### Phase 3: Execute
 
@@ -79,6 +115,8 @@ Show the user:
 - .gitignore entries added
 - Branch name
 - Any warnings (sensitive files detected, lockfiles left alone, exceptions added for tracked files)
+- The English name or description you drafted, whenever it differs from what the user said, so
+  they can correct it while the repository is still new
 
 ## How .gitignore is generated
 
@@ -119,6 +157,7 @@ Every project type also receives a shared block for agent tooling (`CLAUDE.md`, 
 | Tracked file matches a new rule | Add `!<path>` exception so it stays tracked, and warn |
 | Several lockfiles present | Ignore none of them, warn that the package manager is ambiguous |
 | Lockfile deleted but still in index | Treated as a pending deletion, no exception added |
+| Non-ASCII directory name | Offer an English kebab-case name and say what it was derived from |
 
 ## Supported Project Types
 
