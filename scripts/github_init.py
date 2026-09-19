@@ -223,7 +223,8 @@ def cmd_init(args):
         step("Skipping .gitignore generation")
     else:
         template_key = proj_type or "general"
-        new_entries = GITIGNORE_TEMPLATES.get(template_key, GITIGNORE_TEMPLATES["general"])
+        # Copy so appending sensitive files below doesn't mutate the global template.
+        new_entries = list(GITIGNORE_TEMPLATES.get(template_key, GITIGNORE_TEMPLATES["general"]))
         sensitive = detect_sensitive_files(cwd)
         for s in sensitive:
             if s not in new_entries:
@@ -259,8 +260,16 @@ def cmd_init(args):
         step("Git already initialized")
 
     # ---- branch ----
-    branch = git["current_branch"] or "main"
-    if not git["has_commits"] and branch != "main":
+    # Re-detect the branch AFTER git init: the earlier detection ran before the
+    # repo existed (current_branch was None), so on environments whose git default
+    # is still "master" the rename would never fire. Query the real branch now.
+    if not dry:
+        r = run("git branch --show-current", cwd=cwd)
+        actual_branch = r.stdout.strip() if r.returncode == 0 else ""
+    else:
+        actual_branch = git["current_branch"] or ""
+    branch = actual_branch or "main"
+    if not git["has_commits"] and actual_branch and actual_branch != "main":
         if not dry:
             run("git branch -M main", cwd=cwd)
         branch = "main"

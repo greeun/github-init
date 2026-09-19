@@ -5,6 +5,7 @@ description: |
   Automates project detection, .gitignore generation, and edge case handling.
   Use when: "initialize git repo", "create GitHub repository", "push to GitHub", "set up git",
   "깃허브 초기화", "깃 설정", "저장소 생성", "깃허브 연동", "깃허브 푸시", "깃허브에 올려줘".
+version: 1.0.0
 ---
 
 # GitHub Repository Initialization
