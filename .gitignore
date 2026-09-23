@@ -32,3 +32,11 @@ __pycache__/
 *-output/
 # <<< skill-artifacts
 .claude/
+
+# local tooling (machine-specific)
+.axt-profile.json*
+
+# env files
+.env*
+!.env*.example
+!.env*.template
