@@ -346,6 +346,128 @@ def plan_merge(existing_text, sections):
     return to_append, restated, added
 
 
+def tracked_files(cwd):
+    """Paths git tracks, or an empty set when there is no repository yet."""
+    r = run("git ls-files", cwd=cwd)
+    if r.returncode != 0:
+        return set()
+    return {line.strip() for line in r.stdout.splitlines() if line.strip()}
+
+
+def is_literal(pattern):
+    """A pattern naming one file rather than a glob, a directory or an exception."""
+    return not (
+        pattern.startswith("!")
+        or pattern.endswith("/")
+        or any(ch in pattern for ch in "*?[")
+    )
+
+
+def drop_tracked_literals(sections, tracked):
+    """Remove literal patterns that name a file the repository already tracks.
+
+    The template's literals (such as CLAUDE.md in the agent tooling block) are
+    there because in most projects those files are not part of the project.
+    When the repository tracks one, the author has decided otherwise. Writing
+    the pattern and then a "!<path>" exception for it would only leave two
+    contradicting lines, so the pattern is not written at all.
+
+    A literal without a slash matches at any depth, the way git reads it; a
+    literal with a slash is anchored to the repository root.
+    """
+    names = {Path(p).name for p in tracked}
+    kept, dropped = [], []
+    for comment, patterns in sections:
+        keep = []
+        for p in patterns:
+            if is_literal(p):
+                bare = p.lstrip("/")
+                hit = bare in tracked if "/" in p else bare in names
+                if hit:
+                    dropped.append(p)
+                    continue
+            keep.append(p)
+        kept.append((comment, keep))
+    return kept, dropped
+
+
+def update_gitignore(cwd, proj_type, git, dry, step, warn):
+    """Create or merge .gitignore. Never stages, commits or pushes anything."""
+    gitignore_path = Path(cwd) / ".gitignore"
+    template_key = proj_type or "general"
+    sections = build_sections(cwd, template_key)
+
+    # Anything credential-shaped that the template does not already cover
+    # deserves its own line, so the reason it is ignored stays readable.
+    covered = {p.strip().lower() for _, patterns in sections for p in patterns}
+    extra_sensitive = [s for s in detect_sensitive_files(cwd) if s.lower() not in covered]
+    if extra_sensitive:
+        sections.append(("credentials found in this directory", extra_sensitive))
+
+    if git["has_git"]:
+        sections, dropped = drop_tracked_literals(sections, tracked_files(cwd))
+        if dropped:
+            step(f"Left out pattern(s) naming tracked files: {', '.join(dropped)}")
+
+    if template_key == "nodejs":
+        manager, lock, _ = detect_package_manager(cwd)
+        if manager:
+            step(f"Detected package manager: {manager} ({lock})")
+        elif any((Path(cwd) / n).exists() for n in LOCKFILES):
+            warn("Multiple lockfiles present; leaving all of them tracked")
+
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text()
+        to_append, restated, added = plan_merge(existing, sections)
+        if added:
+            body = render_sections(to_append, header="# Added by github-init")
+            if restated:
+                body += "\n" + render_sections(
+                    [("exceptions restated so the rules above cannot cancel them", restated)]
+                )
+            if not dry:
+                with gitignore_path.open("a") as f:
+                    if not existing.endswith("\n"):
+                        f.write("\n")
+                    f.write("\n" + body)
+            step(f"Merged {added} entries into existing .gitignore ({template_key})")
+            if restated:
+                step(f"Restated {len(restated)} exception(s) to preserve their effect")
+            for line in body.splitlines():
+                if line.strip():
+                    print(f"      {line}")
+        else:
+            step(".gitignore already up-to-date")
+    else:
+        content = render_sections(sections, header=f"# {template_key} .gitignore")
+        if not dry:
+            gitignore_path.write_text(content)
+        count = sum(len(p) for _, p in sections)
+        step(f"Created .gitignore ({template_key}, {count} entries)")
+
+    # ---- verify against what git already tracks ----
+    # Only meaningful once a repository exists: a fresh directory tracks
+    # nothing, so there is no contradiction to find yet.
+    if git["has_git"] and not dry:
+        conflicts = tracked_but_ignored(cwd)
+        if conflicts:
+            exceptions = [f"!{path}" for path in conflicts]
+            with gitignore_path.open("a") as f:
+                f.write("\n" + render_sections([(
+                    "already tracked, so kept tracked despite the rules above",
+                    exceptions,
+                )]))
+            warn(
+                f"{len(conflicts)} tracked file(s) matched the new rules; "
+                f"added exceptions to keep them tracked: {', '.join(conflicts[:5])}"
+                + (" ..." if len(conflicts) > 5 else "")
+            )
+        else:
+            step("No tracked file is matched by the new rules")
+    elif git["has_git"] and dry:
+        step("Would verify the new rules against tracked files")
+
+
 # ---------------------------------------------------------------------------
 # detect subcommand
 # ---------------------------------------------------------------------------
@@ -416,72 +538,10 @@ def cmd_init(args):
     git = detect_git_status(cwd)
 
     # ---- .gitignore ----
-    gitignore_path = Path(cwd) / ".gitignore"
     if args.skip_gitignore:
         step("Skipping .gitignore generation")
     else:
-        template_key = proj_type or "general"
-        sections = build_sections(cwd, template_key)
-
-        # Anything credential-shaped that the template does not already cover
-        # deserves its own line, so the reason it is ignored stays readable.
-        covered = {p.strip().lower() for _, patterns in sections for p in patterns}
-        extra_sensitive = [s for s in detect_sensitive_files(cwd) if s.lower() not in covered]
-        if extra_sensitive:
-            sections.append(("credentials found in this directory", extra_sensitive))
-
-        if template_key == "nodejs":
-            manager, lock, _ = detect_package_manager(cwd)
-            if manager:
-                step(f"Detected package manager: {manager} ({lock})")
-            elif any((Path(cwd) / n).exists() for n in LOCKFILES):
-                warn("Multiple lockfiles present; leaving all of them tracked")
-
-        if gitignore_path.exists():
-            existing = gitignore_path.read_text()
-            to_append, restated, added = plan_merge(existing, sections)
-            if added:
-                body = render_sections(to_append, header="# Added by github-init")
-                if restated:
-                    body += "\n" + render_sections(
-                        [("exceptions restated so the rules above cannot cancel them", restated)]
-                    )
-                if not dry:
-                    with gitignore_path.open("a") as f:
-                        if not existing.endswith("\n"):
-                            f.write("\n")
-                        f.write("\n" + body)
-                step(f"Merged {added} entries into existing .gitignore ({template_key})")
-                if restated:
-                    step(f"Restated {len(restated)} exception(s) to preserve their effect")
-            else:
-                step(".gitignore already up-to-date")
-        else:
-            content = render_sections(sections, header=f"# {template_key} .gitignore")
-            if not dry:
-                gitignore_path.write_text(content)
-            count = sum(len(p) for _, p in sections)
-            step(f"Created .gitignore ({template_key}, {count} entries)")
-
-        # ---- verify against what git already tracks ----
-        # Only meaningful once a repository exists: a fresh directory tracks
-        # nothing, so there is no contradiction to find yet.
-        if git["has_git"] and not dry:
-            conflicts = tracked_but_ignored(cwd)
-            if conflicts:
-                exceptions = [f"!{path}" for path in conflicts]
-                with gitignore_path.open("a") as f:
-                    f.write("\n" + render_sections([(
-                        "already tracked, so kept tracked despite the rules above",
-                        exceptions,
-                    )]))
-                warn(
-                    f"{len(conflicts)} tracked file(s) matched the new rules; "
-                    f"added exceptions to keep them tracked: {', '.join(conflicts[:5])}"
-                    + (" ..." if len(conflicts) > 5 else "")
-                )
-        elif git["has_git"] and dry:
-            step("Would verify the new rules against tracked files")
+        update_gitignore(cwd, proj_type, git, dry, step, warn)
 
     # ---- git init ----
     if not git["has_git"]:
@@ -560,6 +620,42 @@ def cmd_init(args):
     _summary(len(errors) == 0, steps, errors, repo_name=repo_name, warnings=warnings)
 
 
+def cmd_gitignore(args):
+    """Update .gitignore alone: no gh, no commit, no remote.
+
+    Kept apart from init because an existing repository usually has its own
+    branch rules and commit conventions. The change is left in the working tree
+    for the caller to review and commit on the branch they choose.
+    """
+    cwd = os.path.abspath(args.path)
+    dry = args.dry_run
+    warnings = []
+
+    def step(msg):
+        print(f"  {'[DRY-RUN] ' if dry else ''}+ {msg}")
+
+    def warn(msg):
+        warnings.append(msg)
+        print(f"  ~ {msg}")
+
+    proj_type, _, _ = detect_project_type(cwd)
+    git = detect_git_status(cwd)
+    update_gitignore(cwd, proj_type, git, dry, step, warn)
+
+    print()
+    if warnings:
+        print("Warnings:")
+        for w in warnings:
+            print(f"  - {w}")
+        print()
+    if dry:
+        print("Dry run: .gitignore was not changed.")
+    elif git["has_git"]:
+        print("Done. Review with `git diff .gitignore`; nothing was staged or committed.")
+    else:
+        print("Done. No git repository here yet; nothing was staged or committed.")
+
+
 def _summary(success, steps, errors, repo_name=None, warnings=None):
     print()
     if warnings:
@@ -596,11 +692,18 @@ def main():
     p_init.add_argument("--skip-gitignore", action="store_true", help="Skip .gitignore generation")
     p_init.add_argument("--dry-run", action="store_true", help="Preview mode, no changes made")
 
+    # gitignore
+    p_ignore = sub.add_parser("gitignore", help="Create or merge .gitignore only (no commit, no remote)")
+    p_ignore.add_argument("path", nargs="?", default=".", help="Project directory")
+    p_ignore.add_argument("--dry-run", action="store_true", help="Preview mode, no changes made")
+
     args = parser.parse_args()
     if args.command == "detect":
         cmd_detect(args)
     elif args.command == "init":
         cmd_init(args)
+    elif args.command == "gitignore":
+        cmd_gitignore(args)
 
 
 if __name__ == "__main__":

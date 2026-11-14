@@ -324,6 +324,13 @@ because order decides what a `!` line means:
 
 ## Verifying against what git already tracks
 
+Before merging, literal patterns (no glob, no trailing `/`, no leading `!`) that name a file the
+repository already tracks are dropped. A literal without a slash is compared against tracked file
+names at any depth, the way git matches it; a literal with a slash is compared against the path
+from the repository root. A repository that commits its `CLAUDE.md` therefore gets no `CLAUDE.md`
+line, rather than the line followed by a `!CLAUDE.md` exception that cancels it. The script
+reports each pattern it left out.
+
 Adding a pattern never untracks anything. A file that is already committed keeps being committed
 while `.gitignore` claims it is out of the repository, and that contradiction is what bites later:
 someone reads the ignore file, assumes the file is gone, and is surprised when their edit to it

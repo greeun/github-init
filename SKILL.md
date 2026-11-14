@@ -3,19 +3,22 @@ name: github-init
 description: |
   Initialize local git repository and create GitHub remote repository with initial commit and push.
   Automates project detection, .gitignore generation, and edge case handling.
+  Also updates the .gitignore of an existing repository on its own, without creating a remote.
   Use when: "initialize git repo", "create GitHub repository", "push to GitHub", "set up git",
-  "깃허브 초기화", "깃 설정", "저장소 생성", "깃허브 연동", "깃허브 푸시", "깃허브에 올려줘".
-version: 1.2.0
+  "update .gitignore", "깃허브 초기화", "깃 설정", "저장소 생성", "깃허브 연동", "깃허브 푸시",
+  "깃허브에 올려줘", ".gitignore 업데이트", ".gitignore 갱신", ".gitignore 정리".
+version: 1.3.0
 ---
 
 # GitHub Repository Initialization
 
 Automates git init, .gitignore generation, GitHub repo creation, and push as one workflow.
+The .gitignore step can also run alone; see [Updating .gitignore only](#updating-gitignore-only).
 
 ## Prerequisites
 
 - `git` installed
-- `gh` CLI installed and authenticated (`gh auth login`)
+- `gh` CLI installed and authenticated (`gh auth login`); not needed for the `gitignore` subcommand
 
 ## Output Language
 
@@ -118,6 +121,36 @@ Show the user:
 - The English name or description you drafted, whenever it differs from what the user said, so
   they can correct it while the repository is still new
 
+## Updating .gitignore only
+
+Use the `gitignore` subcommand when the user asks to update, refresh or tidy `.gitignore`, and
+when an existing repository needs the merge without the rest of `init`. It applies the same
+templates and merge rules as `init`, then stops: it needs no `gh`, and it never stages, commits,
+creates a remote or pushes.
+
+Prefer it over `init` on any repository that already has commits. On such a repository `init`
+runs `git add .` and commits everything under the message `Initial commit`, which sweeps
+unrelated changes into a commit with a misleading message. Likewise, when `init` stops because
+the repository name is taken on GitHub, run this subcommand for the `.gitignore` part and settle
+the remote separately with the user.
+
+1. **Pick where the change lands.** Follow the repository's own rules. If its instructions say
+   work happens on a branch or in a worktree, create that first and run the command there, not
+   in the main working tree. Never leave the change uncommitted on a shared branch.
+2. **Preview.** `python3 ~/.claude/skills/github-init/scripts/github_init.py gitignore --dry-run`
+   prints every pattern it would append. Read the list against the project: a pattern for a file
+   or directory the project deliberately keeps (generated code that is committed, a tracked
+   config folder) has to be raised with the user before applying.
+3. **Apply.** Run the same command without `--dry-run`, then read `git diff .gitignore`.
+4. **Verify.** Confirm both directions:
+   - `git ls-files --ignored --exclude-standard -c` prints nothing, or only the paths the script
+     reported in its warning with a `!<path>` exception.
+   - `git check-ignore -v --no-index <file>` on a real secret file (such as `.env.local`) shows an
+     ignoring rule, and on a tracked example file (such as `.env.example`) shows a `!` rule.
+5. **Report, then commit only on request.** Tell the user which patterns were added, which were
+   left out because they name tracked files, and any warning. Commit when the user asks, in the
+   repository's own commit-message convention, and merge only the way its instructions allow.
+
 ## How .gitignore is generated
 
 Three things make the generated file differ from a plain template dump. Each exists because the
@@ -140,8 +173,15 @@ every tracked file the new rules would have shadowed. Without this the ignore fi
 those files are gone while git keeps committing them. Files the index still holds but the working
 tree no longer has are left alone: those are pending deletions, not conflicts.
 
+**A literal that names a tracked file is not written.** Template entries such as `CLAUDE.md` are
+there because most projects do not keep that file. When the repository already tracks it, the
+author decided otherwise, and writing the pattern followed by a `!CLAUDE.md` exception would only
+leave two lines that contradict each other. Such literals are dropped before merging, and the
+script says which ones it left out. Globs and directory patterns are not dropped; they go through
+the exception check above instead.
+
 Every project type also receives a shared block for agent tooling (`CLAUDE.md`, `.claude/`,
-`.superpowers/`, `.axt*`, `.ast*`) since none of it describes the project. See
+`.superpowers/`, `.axt*`, `.ast*`) since in most projects none of it describes the project. See
 `references/gitignore-templates.md` for the full templates and the merge rules.
 
 ## Edge Cases
@@ -155,6 +195,8 @@ Every project type also receives a shared block for agent tooling (`CLAUDE.md`, 
 | Repo name taken on GitHub | Error with suggestion to use different `--name` |
 | Sensitive files found (.env) | Auto-add to .gitignore before commit |
 | Tracked file matches a new rule | Add `!<path>` exception so it stays tracked, and warn |
+| Template literal names a tracked file (e.g. `CLAUDE.md`) | Leave the pattern out and report it |
+| Only `.gitignore` needs updating | Use the `gitignore` subcommand; nothing is committed |
 | Several lockfiles present | Ignore none of them, warn that the package manager is ambiguous |
 | Lockfile deleted but still in index | Treated as a pending deletion, no exception added |
 | Non-ASCII directory name | Offer an English kebab-case name and say what it was derived from |
@@ -183,6 +225,7 @@ See `references/gitignore-templates.md` for full template details.
 |------------|-------------|
 | `detect [path]` | Detect project type and git status (JSON) |
 | `init` | Full initialization workflow |
+| `gitignore [path]` | Create or merge `.gitignore` only; no commit, no remote. Takes `--dry-run` |
 
 **init options:**
 

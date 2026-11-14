@@ -104,6 +104,16 @@ python3 scripts/github_init.py init --name my-repo --dry-run
 python3 scripts/github_init.py init --name my-repo --skip-gitignore
 ```
 
+**Update `.gitignore` only (existing repository, no commit, no remote):**
+
+```bash
+python3 scripts/github_init.py gitignore --dry-run   # preview the patterns to append
+python3 scripts/github_init.py gitignore             # apply, then review `git diff .gitignore`
+```
+
+Use this instead of `init` on a repository that already has commits: `init` commits every
+pending change as `Initial commit`, while `gitignore` only edits the file.
+
 ### CLI Options
 
 | Subcommand | Flag | Description |
@@ -113,6 +123,8 @@ python3 scripts/github_init.py init --name my-repo --skip-gitignore
 | | `--visibility` | `public` or `private` (default: `private`) |
 | | `--description` | Repository description |
 | | `--skip-gitignore` | Don't generate/merge `.gitignore` |
+| | `--dry-run` | Preview mode, no changes made |
+| `gitignore` | `[path]` | Target directory (default: `.`) |
 | | `--dry-run` | Preview mode, no changes made |
 
 ## How It Works
@@ -150,8 +162,9 @@ detect project type
 When a `.gitignore` already exists, the script:
 1. Reads existing entries
 2. Compares new template entries (case-insensitive)
-3. Appends only unique entries under `# Added by github-init`
-4. Preserves all original content
+3. Leaves out literal entries that name a file the repository already tracks (e.g. a committed `CLAUDE.md`)
+4. Appends only unique entries under `# Added by github-init`
+5. Preserves all original content
 
 ## File Structure
 
