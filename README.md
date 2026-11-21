@@ -114,6 +114,10 @@ python3 scripts/github_init.py gitignore             # apply, then review `git d
 Use this instead of `init` on a repository that already has commits: `init` commits every
 pending change as `Initial commit`, while `gitignore` only edits the file.
 
+On such a repository, commit and merge the updated `.gitignore` into every branch you push
+before creating the remote. A file that reaches the remote stays in its history even after a
+later commit ignores it.
+
 ### CLI Options
 
 | Subcommand | Flag | Description |

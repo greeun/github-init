@@ -111,6 +111,32 @@ python3 ~/.claude/skills/github-init/scripts/github_init.py init \
 Add `--dry-run` to preview without making changes.
 Add `--skip-gitignore` to keep existing .gitignore as-is.
 
+**`.gitignore` lands before the first push, always.** Once a file reaches the remote it stays in
+the history even if a later commit ignores it, so the merged `.gitignore` has to be committed on
+every branch you push before `gh repo create` or `git push` runs. `init` keeps this order on its
+own: it merges `.gitignore`, commits, then creates the remote and pushes.
+
+When the repository already has commits (`has_commits: true` from detect), do not run `init`,
+because it would commit every pending change as `Initial commit` on the current branch. Run the
+steps by hand, in this order, and do not reorder them to save time:
+
+1. Update `.gitignore` with the `gitignore` subcommand, following
+   [Updating .gitignore only](#updating-gitignore-only), and commit it where the repository's
+   rules say work lands (a branch or worktree when they ask for one).
+2. Bring that commit into every branch you are about to push. If merging needs the user's
+   approval under the repository's rules, ask now and wait; creating the remote is not a reason
+   to skip that approval.
+3. Check what will leave the machine: `git ls-files` on each branch to push should contain no
+   secret file, and `git log --all --diff-filter=A --name-only --format=` should show none
+   added in earlier commits either. If one appears, stop and tell the user before pushing.
+4. Only then create the remote and push:
+   `gh repo create <name> --private --description "<text>"`, `git remote add origin <url>`,
+   and `git push -u origin <branch>` for each branch the user chose.
+
+If the user asks to push before the `.gitignore` merge is approved, say that the current rules
+will apply to what gets pushed, show which secret files those rules already cover, and push only
+on their confirmation.
+
 ### Phase 4: Report Result
 
 Show the user:
@@ -150,6 +176,8 @@ the remote separately with the user.
 5. **Report, then commit only on request.** Tell the user which patterns were added, which were
    left out because they name tracked files, and any warning. Commit when the user asks, in the
    repository's own commit-message convention, and merge only the way its instructions allow.
+   A request to create the remote or push counts as a request to commit: the `.gitignore` commit
+   is the first step of that flow (see Phase 3).
 
 ## How .gitignore is generated
 
@@ -191,7 +219,7 @@ Every project type also receives a shared block for agent tooling (`CLAUDE.md`, 
 | Already has `.git/` | Skip `git init`, proceed to remote |
 | Already has remote | Show existing URL, skip `gh repo create` |
 | Has existing `.gitignore` | Smart merge: append missing entries, keep `!` exceptions working |
-| Has existing commits | Skip initial commit, push existing |
+| Has existing commits | Don't run `init`; update and merge `.gitignore` first, then create the remote and push (see Phase 3) |
 | Repo name taken on GitHub | Error with suggestion to use different `--name` |
 | Sensitive files found (.env) | Auto-add to .gitignore before commit |
 | Tracked file matches a new rule | Add `!<path>` exception so it stays tracked, and warn |
